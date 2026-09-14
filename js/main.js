@@ -1,0 +1,324 @@
+!function () {
+  "use strict";
+
+  var prefersReducedMotion = false;
+  try {
+    prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch (err) {
+    prefersReducedMotion = false;
+  }
+
+  // RAF throttle helper for scroll handlers (prevents jank)
+  function rafThrottle(fn) {
+    var ticking = false;
+    return function () {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () {
+        fn();
+        ticking = false;
+      });
+    };
+  }
+
+  // Scroll progress - uses transform scaleX (compositor-only, no layout thrash)
+  var progressBar = document.getElementById("scroll-progress-bar");
+  function updateProgress() {
+    if (!progressBar) return;
+    var scrollY = window.scrollY;
+    var scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+    var progress = scrollHeight > 0 ? scrollY / scrollHeight : 0;
+    // clamp 0-1
+    if (progress < 0) progress = 0;
+    if (progress > 1) progress = 1;
+    progressBar.style.transform = "scaleX(" + progress + ")";
+  }
+  var throttledProgress = rafThrottle(updateProgress);
+  updateProgress();
+  window.addEventListener("scroll", throttledProgress, { passive: true });
+  window.addEventListener("resize", throttledProgress, { passive: true });
+
+  // Navbar scrolled state
+  var navbar = document.getElementById("navbar");
+  var navbarToggle = document.getElementById("navbar-toggle");
+  var primaryNav = document.getElementById("primary-navigation");
+  var isMenuOpen = false;
+
+  function updateNavbarScrolled() {
+    if (navbar) navbar.classList.toggle("navbar--scrolled", window.scrollY > 40);
+  }
+  var throttledNavbar = rafThrottle(updateNavbarScrolled);
+  function setMenuOpen(open) {
+    isMenuOpen = open;
+    if (navbarToggle) {
+      navbarToggle.classList.toggle("navbar__toggle--open", open);
+      navbarToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      navbarToggle.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
+    }
+    if (primaryNav) primaryNav.classList.toggle("navbar__nav--open", open);
+    document.body.style.overflow = open ? "hidden" : "";
+  }
+  updateNavbarScrolled();
+  window.addEventListener("scroll", throttledNavbar, { passive: true });
+  if (navbarToggle) {
+    navbarToggle.addEventListener("click", function () {
+      setMenuOpen(!isMenuOpen);
+    });
+  }
+  document.addEventListener("keydown", function (evt) {
+    if (evt.key === "Escape") setMenuOpen(false);
+  });
+  // Close menu when clicking outside navbar on mobile
+  document.addEventListener("click", function (evt) {
+    if (!isMenuOpen) return;
+    if (!navbar || !primaryNav || !navbarToggle) return;
+    if (window.innerWidth > 920) return;
+    var target = evt.target;
+    if (navbar.contains(target)) return;
+    setMenuOpen(false);
+  });
+  // Close on resize to desktop
+  window.addEventListener("resize", function () {
+    if (window.innerWidth > 920 && isMenuOpen) setMenuOpen(false);
+  });
+
+  // Active nav link via IntersectionObserver
+  var navLinks = Array.prototype.slice.call(document.querySelectorAll(".navbar__link"));
+  var navTargets = navLinks
+    .map(function (link) {
+      var href = link.getAttribute("href");
+      if (!href || href.charAt(0) !== "#") return null;
+      try {
+        return document.querySelector(href);
+      } catch (e) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+
+  if (navTargets.length > 0 && "IntersectionObserver" in window) {
+    var activeObserver = new IntersectionObserver(
+      function (entries) {
+        var visible = entries.filter(function (entry) { return entry.isIntersecting; });
+        if (visible.length === 0) return;
+        visible.sort(function (a, b) {
+          return Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top);
+        });
+        var targetId = "#" + visible[0].target.id;
+        navLinks.forEach(function (link) {
+          var isActive = link.getAttribute("href") === targetId;
+          link.classList.toggle("navbar__link--active", isActive);
+          if (isActive) link.setAttribute("aria-current", "location");
+          else link.removeAttribute("aria-current");
+        });
+      },
+      { rootMargin: "-35% 0px -55% 0px", threshold: 0 }
+    );
+    navTargets.forEach(function (el) { activeObserver.observe(el); });
+  }
+
+  Array.prototype.slice.call(document.querySelectorAll(".navbar__nav a")).forEach(function (link) {
+    link.addEventListener("click", function () { setMenuOpen(false); });
+  });
+
+  // Back to top - throttled
+  var backToTop = document.getElementById("back-to-top");
+  function updateBackToTop() {
+    if (backToTop) backToTop.classList.toggle("back-to-top--visible", window.scrollY > 600);
+  }
+  var throttledBackToTop = rafThrottle(updateBackToTop);
+  updateBackToTop();
+  window.addEventListener("scroll", throttledBackToTop, { passive: true });
+  if (backToTop) {
+    backToTop.addEventListener("click", function () {
+      window.scrollTo({ top: 0, behavior: prefersReducedMotion ? "auto" : "smooth" });
+    });
+  }
+
+  // Reveal on scroll - with staggered delay to avoid jank
+  var revealEls = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+  if (prefersReducedMotion || !("IntersectionObserver" in window)) {
+    revealEls.forEach(function (el) { el.classList.add("reveal--visible"); });
+  } else {
+    var revealObserver = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("reveal--visible");
+            revealObserver.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15, rootMargin: "0px 0px -10% 0px" }
+    );
+    revealEls.forEach(function (el) { revealObserver.observe(el); });
+  }
+
+  // Pause ecosystem orbit when offscreen (saves CPU/GPU)
+  var ecosystemSection = document.querySelector(".agrivex-ecosystem");
+  var orbitEls = document.querySelectorAll(".agrivex-ecosystem__orbit");
+  if (ecosystemSection && "IntersectionObserver" in window && orbitEls.length) {
+    var orbitObserver = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          var state = entry.isIntersecting ? "running" : "paused";
+          orbitEls.forEach(function (el) { el.style.animationPlayState = state; });
+        });
+      },
+      { threshold: 0 }
+    );
+    orbitObserver.observe(ecosystemSection);
+    // Respect reduced motion
+    if (prefersReducedMotion) {
+      orbitEls.forEach(function (el) { el.style.animation = "none"; });
+    }
+  }
+
+  // Flip cards (agriculture vision)
+  Array.prototype.slice.call(document.querySelectorAll("[data-flip-card]")).forEach(function (card) {
+    function toggleFlip() {
+      var isFlipped = card.classList.toggle("agriculture-vision__pillar--flipped");
+      card.setAttribute("aria-pressed", isFlipped ? "true" : "false");
+    }
+    card.setAttribute("role", "button");
+    if (!card.hasAttribute("aria-pressed")) card.setAttribute("aria-pressed", "false");
+    card.addEventListener("click", toggleFlip);
+    card.addEventListener("keydown", function (evt) {
+      if (evt.key === "Enter" || evt.key === " ") {
+        evt.preventDefault();
+        toggleFlip();
+      }
+    });
+  });
+
+  // Strategic capabilities: interactive cards
+  var capabilityCards = Array.prototype.slice.call(document.querySelectorAll("[data-capability-index]"));
+  var capabilityContainer = document.getElementById("capability-cards");
+  var capabilityCounter = document.getElementById("capability-counter-current");
+  var capabilityCount = capabilityCards.length;
+  var hoveredIndex = null;
+  var isContainerHovered = false;
+  var activeIndex = 2;
+
+  function updateCapabilityActive() {
+    var current = hoveredIndex !== null ? hoveredIndex : activeIndex;
+    capabilityCards.forEach(function (card, idx) {
+      var isActive = idx === current;
+      card.classList.toggle("strategic-capabilities__card--active", isActive);
+      card.setAttribute("aria-selected", isActive ? "true" : "false");
+      if (isActive) card.setAttribute("tabindex", "0");
+      else card.setAttribute("tabindex", "-1");
+    });
+    if (capabilityCounter) {
+      capabilityCounter.textContent = String(current + 1).padStart(2, "0");
+    }
+  }
+  if (capabilityCount > 0) {
+    capabilityCards.forEach(function (card, idx) {
+      card.setAttribute("role", "tab");
+      card.setAttribute("aria-label", "Capability " + (idx + 1) + " of " + capabilityCount);
+    });
+    if (capabilityContainer) capabilityContainer.setAttribute("role", "tablist");
+    updateCapabilityActive();
+
+    var rotateInterval = null;
+    if (!prefersReducedMotion) {
+      rotateInterval = window.setInterval(function () {
+        if (isContainerHovered || hoveredIndex !== null) return;
+        if (document.hidden) return;
+        activeIndex = (activeIndex + 1) % capabilityCount;
+        updateCapabilityActive();
+      }, 5000);
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden && rotateInterval) {
+          window.clearInterval(rotateInterval);
+          rotateInterval = null;
+        } else if (!document.hidden && !rotateInterval) {
+          rotateInterval = window.setInterval(function () {
+            if (isContainerHovered || hoveredIndex !== null) return;
+            activeIndex = (activeIndex + 1) % capabilityCount;
+            updateCapabilityActive();
+          }, 5000);
+        }
+      });
+      // Pause auto-rotate when section offscreen
+      if ("IntersectionObserver" in window && capabilityContainer) {
+        var capObserver = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (!entry.isIntersecting && rotateInterval) {
+                window.clearInterval(rotateInterval);
+                rotateInterval = null;
+              } else if (entry.isIntersecting && !rotateInterval && !prefersReducedMotion) {
+                rotateInterval = window.setInterval(function () {
+                  if (isContainerHovered || hoveredIndex !== null) return;
+                  if (document.hidden) return;
+                  activeIndex = (activeIndex + 1) % capabilityCount;
+                  updateCapabilityActive();
+                }, 5000);
+              }
+            });
+          },
+          { threshold: 0.1 }
+        );
+        capObserver.observe(capabilityContainer);
+      }
+    }
+
+    if (capabilityContainer) {
+      capabilityContainer.addEventListener("mouseenter", function () { isContainerHovered = true; });
+      capabilityContainer.addEventListener("mouseleave", function () {
+        isContainerHovered = false;
+        hoveredIndex = null;
+        updateCapabilityActive();
+      });
+      capabilityContainer.addEventListener("focusin", function () { isContainerHovered = true; });
+      capabilityContainer.addEventListener("focusout", function () {
+        window.setTimeout(function () {
+          if (!capabilityContainer.contains(document.activeElement)) {
+            isContainerHovered = false;
+            hoveredIndex = null;
+            updateCapabilityActive();
+          }
+        }, 100);
+      });
+    }
+    capabilityCards.forEach(function (card, idx) {
+      card.addEventListener("mouseenter", function () {
+        hoveredIndex = idx;
+        updateCapabilityActive();
+      });
+      card.addEventListener("focus", function () {
+        hoveredIndex = idx;
+        updateCapabilityActive();
+      });
+      card.addEventListener("click", function () {
+        activeIndex = idx;
+        hoveredIndex = idx;
+        updateCapabilityActive();
+      });
+      card.addEventListener("keydown", function (evt) {
+        if (evt.key === "ArrowRight" || evt.key === "ArrowDown") {
+          evt.preventDefault();
+          var next = (idx + 1) % capabilityCount;
+          capabilityCards[next].focus();
+        } else if (evt.key === "ArrowLeft" || evt.key === "ArrowUp") {
+          evt.preventDefault();
+          var prev = (idx - 1 + capabilityCount) % capabilityCount;
+          capabilityCards[prev].focus();
+        } else if (evt.key === "Home") {
+          evt.preventDefault();
+          capabilityCards[0].focus();
+        } else if (evt.key === "End") {
+          evt.preventDefault();
+          capabilityCards[capabilityCount - 1].focus();
+        }
+      });
+    });
+  }
+
+  // Current year
+  var yearEl = document.getElementById("current-year");
+  if (yearEl) yearEl.textContent = String(new Date().getFullYear());
+
+}();

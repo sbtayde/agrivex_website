@@ -1,0 +1,1 @@
+.reveal{opacity:0;transform:translate3d(0,2rem,0);transition:opacity .5s var(--ease-standard),transform .5s var(--ease-standard);backface-visibility:hidden}.reveal--visible{opacity:1;transform:translate3d(0,0,0)}@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}

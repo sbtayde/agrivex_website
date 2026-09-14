@@ -1,0 +1,1 @@
+.container{width:min(100% - var(--space-8),var(--container-xl));margin-inline:auto}@media (max-width:640px){.container{width:min(100% - var(--space-6),var(--container-xl))}}
