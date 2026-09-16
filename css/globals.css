@@ -1,7 +1,9 @@
 *,::after,::before{box-sizing:border-box}*{margin:0}html{scroll-behavior:smooth;scroll-padding-top:var(--header-height);scrollbar-color:var(--color-border-strong) var(--color-surface-muted);scrollbar-width:thin}body{min-width:320px;min-height:100vh;background:var(--color-surface-page);color:var(--color-text-primary);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;overflow-x:hidden}canvas,img,picture,svg,video{display:block;max-width:100%}button{border:0;padding:0;background:0 0;color:inherit;font:inherit;cursor:pointer}::selection{background:var(--color-selection-background);color:var(--color-selection-text)}::-webkit-scrollbar{width:10px}::-webkit-scrollbar-track{background:var(--color-surface-muted)}::-webkit-scrollbar-thumb{background:var(--color-border-strong);border-radius:var(--radius-full)}::-webkit-scrollbar-thumb:hover{background:var(--color-brand-primary)}
 /* Performance: lazy rendering for below-fold sections */
 .agrivex-ecosystem,.strategic-capabilities,.dealer-partnership,.farmer-solutions,.contact,.careers{content-visibility:auto;contain-intrinsic-size:auto 600px}
-/* Optimize image rendering */
-img{image-rendering:auto;content-visibility:auto}
+/* Optimize image rendering — FIX: remove content-visibility from hero/LCP images to avoid delayed paint */
+img{image-rendering:auto}
 picture{contain:layout}
+/* Only lazy images can use content-visibility; hero image is eager */
+img[loading="lazy"]{content-visibility:auto}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,::before,::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important}}

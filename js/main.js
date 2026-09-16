@@ -38,48 +38,182 @@
   window.addEventListener("scroll", throttledProgress, { passive: true });
   window.addEventListener("resize", throttledProgress, { passive: true });
 
-  // Navbar scrolled state
+  // Navbar scrolled state + hamburger menu (mobile responsive)
   var navbar = document.getElementById("navbar");
   var navbarToggle = document.getElementById("navbar-toggle");
   var primaryNav = document.getElementById("primary-navigation");
   var isMenuOpen = false;
+  var lastFocusedEl = null;
+  var backdropEl = null;
+
+  // Create backdrop overlay once
+  function ensureBackdrop() {
+    if (backdropEl) return backdropEl;
+    backdropEl = document.getElementById("navbar-backdrop");
+    if (!backdropEl && navbar) {
+      backdropEl = document.createElement("div");
+      backdropEl.id = "navbar-backdrop";
+      backdropEl.className = "navbar__backdrop";
+      backdropEl.setAttribute("aria-hidden", "true");
+      // Insert right after navbar for correct stacking
+      if (navbar.parentNode) navbar.parentNode.insertBefore(backdropEl, navbar.nextSibling);
+      else document.body.appendChild(backdropEl);
+      backdropEl.addEventListener("click", function () { setMenuOpen(false); });
+    }
+    return backdropEl;
+  }
+  ensureBackdrop();
+
+  function getFocusable() {
+    if (!primaryNav) return [];
+    var nodes = primaryNav.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    return Array.prototype.slice.call(nodes).filter(function (el) {
+      return el.offsetParent !== null || el.getClientRects().length > 0;
+    });
+  }
+
+  function supportsInert() {
+    return "inert" in HTMLElement.prototype;
+  }
 
   function updateNavbarScrolled() {
     if (navbar) navbar.classList.toggle("navbar--scrolled", window.scrollY > 40);
   }
   var throttledNavbar = rafThrottle(updateNavbarScrolled);
+
+  var previousBodyPaddingRight = "";
+  var previousNavbarPaddingRight = "";
+
+  function getScrollbarWidth() {
+    return window.innerWidth - document.documentElement.clientWidth;
+  }
+
+  function lockScroll() {
+    var sbWidth = getScrollbarWidth();
+    if (sbWidth > 0) {
+      previousBodyPaddingRight = document.body.style.paddingRight;
+      previousNavbarPaddingRight = navbar ? navbar.style.paddingRight : "";
+      document.body.style.paddingRight = sbWidth + "px";
+      if (navbar) navbar.style.paddingRight = sbWidth + "px";
+    }
+    // Lock scroll via class on html+body (CSS: overflow:hidden) + inline fallback
+    document.documentElement.classList.add("navbar--menu-open");
+    document.body.classList.add("navbar--menu-open");
+    document.body.style.overflow = "hidden";
+  }
+
+  function unlockScroll() {
+    document.body.style.paddingRight = previousBodyPaddingRight;
+    if (navbar) navbar.style.paddingRight = previousNavbarPaddingRight;
+    document.documentElement.classList.remove("navbar--menu-open");
+    document.body.classList.remove("navbar--menu-open");
+    document.body.style.overflow = "";
+  }
+
   function setMenuOpen(open) {
+    if (open === isMenuOpen) return;
     isMenuOpen = open;
+    var bd = ensureBackdrop();
     if (navbarToggle) {
       navbarToggle.classList.toggle("navbar__toggle--open", open);
       navbarToggle.setAttribute("aria-expanded", open ? "true" : "false");
       navbarToggle.setAttribute("aria-label", open ? "Close navigation menu" : "Open navigation menu");
     }
-    if (primaryNav) primaryNav.classList.toggle("navbar__nav--open", open);
-    document.body.style.overflow = open ? "hidden" : "";
+    if (primaryNav) {
+      primaryNav.classList.toggle("navbar__nav--open", open);
+      primaryNav.setAttribute("aria-hidden", open ? "false" : "true");
+      // inert is progressive enhancement; set attribute regardless but feature-detect removal
+      if (open) {
+        if (supportsInert()) primaryNav.removeAttribute("inert");
+        else primaryNav.removeAttribute("inert");
+      } else {
+        primaryNav.setAttribute("inert", "");
+      }
+    }
+    if (bd) bd.classList.toggle("navbar__backdrop--visible", open);
+    if (open) {
+      lockScroll();
+      lastFocusedEl = document.activeElement;
+      window.setTimeout(function () {
+        var f = getFocusable()[0];
+        if (f) f.focus();
+      }, 80);
+    } else {
+      unlockScroll();
+      if (lastFocusedEl && lastFocusedEl.focus) {
+        try { lastFocusedEl.focus(); } catch(e) {}
+      } else if (navbarToggle) {
+        try { navbarToggle.focus(); } catch(e) {}
+      }
+    }
   }
   updateNavbarScrolled();
   window.addEventListener("scroll", throttledNavbar, { passive: true });
   if (navbarToggle) {
-    navbarToggle.addEventListener("click", function () {
+    navbarToggle.addEventListener("click", function (e) {
+      e.stopPropagation();
       setMenuOpen(!isMenuOpen);
     });
   }
+  // Toggle inert/aria-hidden initially (hidden on mobile until opened)
+  if (primaryNav) {
+    if (window.innerWidth <= 920) {
+      primaryNav.setAttribute("aria-hidden", "true");
+      primaryNav.setAttribute("inert", "");
+    } else {
+      primaryNav.setAttribute("aria-hidden", "false");
+      if (supportsInert()) primaryNav.removeAttribute("inert");
+      else primaryNav.removeAttribute("inert");
+    }
+  }
+
   document.addEventListener("keydown", function (evt) {
-    if (evt.key === "Escape") setMenuOpen(false);
+    if (evt.key === "Escape" && isMenuOpen) {
+      evt.preventDefault();
+      setMenuOpen(false);
+    }
+    // Focus trap when menu open
+    if (evt.key === "Tab" && isMenuOpen) {
+      var focusable = getFocusable();
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (evt.shiftKey && document.activeElement === first) {
+        evt.preventDefault();
+        last.focus();
+      } else if (!evt.shiftKey && document.activeElement === last) {
+        evt.preventDefault();
+        first.focus();
+      }
+    }
   });
-  // Close menu when clicking outside navbar on mobile
+  // Close menu when clicking outside navbar on mobile (backdrop handles most, this is fallback)
   document.addEventListener("click", function (evt) {
     if (!isMenuOpen) return;
     if (!navbar || !primaryNav || !navbarToggle) return;
     if (window.innerWidth > 920) return;
     var target = evt.target;
     if (navbar.contains(target)) return;
+    if (backdropEl && backdropEl.contains(target)) return;
     setMenuOpen(false);
   });
-  // Close on resize to desktop
+  // Close on resize to desktop (debounced)
+  var resizeTimerNav = null;
   window.addEventListener("resize", function () {
-    if (window.innerWidth > 920 && isMenuOpen) setMenuOpen(false);
+    window.clearTimeout(resizeTimerNav);
+    resizeTimerNav = window.setTimeout(function () {
+      if (window.innerWidth > 920 && isMenuOpen) setMenuOpen(false);
+      // Toggle inert/aria-hidden for desktop vs mobile
+      if (primaryNav) {
+        if (window.innerWidth > 920) {
+          primaryNav.removeAttribute("inert");
+          primaryNav.setAttribute("aria-hidden", "false");
+        } else if (!isMenuOpen) {
+          primaryNav.setAttribute("aria-hidden", "true");
+          primaryNav.setAttribute("inert", "");
+        }
+      }
+    }, 120);
   });
 
   // Active nav link via IntersectionObserver
